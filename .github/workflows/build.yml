@@ -137,7 +137,9 @@ jobs:
             INSTALL_MOD_PATH=$PWD/modules_out INSTALL_MOD_STRIP=1 DEPMOD=/bin/true \
             modules_install
           find modules_out -name '*.ko' | sort | tee modules.lst
-          (cd modules_out/lib/modules && zip -r9 "../../../NetHunter-modules-$KVER.zip" .)
+          mkdir -p "modules_pkg/lib/modules/$KVER"
+          find modules_out -name '*.ko' -exec cp {} "modules_pkg/lib/modules/$KVER/" \;
+          (cd modules_pkg && zip -r9 "../NetHunter-modules-$KVER.zip" .)
           ls -lh NetHunter-modules-*.zip
 
       - name: Package AnyKernel3

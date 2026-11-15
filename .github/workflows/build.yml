@@ -31,10 +31,36 @@ jobs:
       - name: Fix qcacld symlinks
         run: |
           cd drivers/staging/qcacld-3.0
-          for f in core/hdd/inc/*.h; do
-            b=$(basename "$f")
-            [ -e "inc/$b" ] || ln -s "../core/hdd/inc/$b" "inc/$b"
+          for d in $(find . -type d -name inc); do
+            for f in "$d"/*.h; do
+              if [ -f "$f" ]; then
+                b=$(basename "$f")
+                if [ ! -e "inc/$b" ]; then
+                  ln -s "../${d#./}/$b" "inc/$b" || true
+                fi
+              fi
+            done
           done
+          ls -l inc/wma_frame_inject.h inc/wlan_hdd_frame_inject.h
+
+      - name: Enable qcacld frame injection
+        run: |
+          python3 - <<'PY'
+          p = "nethunter/Kconfig"
+          s = open(p).read()
+          if "FEATURE_FRAME_INJECTION_SUPPORT" not in s:
+              block = ("\nconfig FEATURE_FRAME_INJECTION_SUPPORT\n"
+                       "\tbool \"qcacld-3.0 frame injection / internal monitor\"\n"
+                       "\tdefault y\n"
+                       "\thelp\n"
+                       "\t  Enable NetHunter qcacld frame injection support.\n\n")
+              i = s.rfind("endmenu")
+              s = s[:i] + block + s[i:]
+              open(p, "w").write(s)
+          print("Kconfig patched")
+          PY
+          echo "CONFIG_FEATURE_FRAME_INJECTION_SUPPORT=y" >> nethunter/nethunter_defconfig
+          grep -n FEATURE_FRAME_INJECTION nethunter/Kconfig nethunter/nethunter_defconfig
 
       - name: Configure kernel
         run: |

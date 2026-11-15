@@ -7,10 +7,12 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 300
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -102,9 +104,112 @@ jobs:
           fi
           exit "$status"
 
+      - name: Build modules
+        run: |
+          export PATH=$PWD/toolchains/bin:$PATH
+          set +e
+          make -j$(nproc) ARCH=arm64 O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_32=arm-linux-gnueabi- \
+            LLVM=1 LLVM_IAS=1 AS=llvm-as DTC_EXT=$PWD/dtc modules \
+            2>&1 | tee modules.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "================ MODULES ERROR ================"
+            grep -nE "fatal error|error:|Error 1" modules.log | head -20
+            echo "================ CONTEXT ================"
+            first=$(grep -n -m1 "Error 1" modules.log | cut -d: -f1)
+            if [ -n "$first" ]; then
+              start=$((first-30))
+              [ "$start" -lt 1 ] && start=1
+              sed -n "${start},$((first+5))p" modules.log
+            fi
+          fi
+          exit "$status"
+
+      - name: Install modules
+        run: |
+          export PATH=$PWD/toolchains/bin:$PATH
+          KVER=$(cat out/include/config/kernel.release)
+          echo "KERNELRELEASE=$KVER"
+          make ARCH=arm64 O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_32=arm-linux-gnueabi- \
+            LLVM=1 LLVM_IAS=1 AS=llvm-as DTC_EXT=$PWD/dtc \
+            INSTALL_MOD_PATH=$PWD/modules_out INSTALL_MOD_STRIP=1 DEPMOD=/bin/true \
+            modules_install
+          find modules_out -name '*.ko' | sort | tee modules.lst
+          (cd modules_out/lib/modules && zip -r9 "../../../NetHunter-modules-$KVER.zip" .)
+          ls -lh NetHunter-modules-*.zip
+
+      - name: Package AnyKernel3
+        run: |
+          KVER=$(cat out/include/config/kernel.release)
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git ak3
+          rm -rf ak3/.git
+          cp out/arch/arm64/boot/Image.gz ak3/Image.gz
+          mkdir -p "ak3/modules/vendor/lib/modules/$KVER"
+          find modules_out -name '*.ko' -exec cp {} "ak3/modules/vendor/lib/modules/$KVER/" \;
+          ls -l "ak3/modules/vendor/lib/modules/$KVER" || true
+          cat > ak3/anykernel.sh <<'EOF'
+          ### AnyKernel3 Ramdisk Mod Script
+          ## Packaged by GitHub Actions
+
+          properties() { '
+          kernel.string=NetHunter SM8150 (LineageOS 23.2)
+          do.devicecheck=0
+          do.modules=1
+          do.systemless=0
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=OnePlus7
+          device.name2=OnePlus7Pro
+          supported.versions=
+          supported.patchlevels=
+          '; } # end properties
+
+          boot_attributes() {
+          set_perm_recursive 0 0 755 644 $RAMDISK/*;
+          set_perm_recursive 0 0 750 750 $RAMDISK/init* $RAMDISK/sbin;
+          } # end boot_attributes
+
+          BLOCK=/dev/block/bootdevice/by-name/boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+
+          . tools/ak3-core.sh;
+
+          dump_boot;
+          write_boot;
+          EOF
+          cd ak3
+          zip -r9 "../NetHunter-SM8150-AK3-$(date +%Y%m%d).zip" . -x ".git/*"
+          cd ..
+          ls -lh NetHunter-SM8150-AK3-*.zip
+
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
-          name: nethunter-kernel-image
-          path: out/arch/arm64/boot/Image.gz
+          name: nethunter-ak3
+          path: |
+            NetHunter-SM8150-AK3-*.zip
+            NetHunter-modules-*.zip
+            out/arch/arm64/boot/Image.gz
           if-no-files-found: error
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="nethunter-sm8150-$(date +%Y%m%d)-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          KVER="$(cat out/include/config/kernel.release)"
+          gh release create "$TAG" \
+            NetHunter-SM8150-AK3-*.zip \
+            NetHunter-modules-*.zip \
+            out/arch/arm64/boot/Image.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "NetHunter SM8150 (LineageOS 23.2) #${GITHUB_RUN_NUMBER}" \
+            --notes "自动构建，提交 ${GITHUB_SHA:0:10}，内核 ${KVER}
+
+          刷入：TWRP 里安装 AnyKernel3 zip（A/B 自动选当前活动槽）。
+          模块：随 zip 写入 /vendor/lib/modules/${KVER}/，也可单独下载 modules zip 手动推送。
+          运行记录：${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

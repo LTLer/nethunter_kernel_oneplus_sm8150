@@ -57,12 +57,26 @@ jobs:
           echo "----- key config -----"
           grep -E 'MODVERSIONS|MODULE_FORCE_LOAD|MODULE_SIG|^CONFIG_LOCALVERSION' out/.config || true
 
-      - name: Build Image.gz
-        run: |
+            - name: Build Image.gz
+         run: |
           export PATH=$PWD/toolchains/bin:$PATH
+          set +e
           make -j$(nproc) ARCH=arm64 O=out \
             CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 AS=llvm-as DTC_EXT=$PWD/dtc Image.gz
+            LLVM=1 LLVM_IAS=1 AS=llvm-as DTC_EXT=$PWD/dtc Image.gz \
+            2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then
+            echo "================ ERROR SUMMARY ================"
+            grep -nE "fatal error|error:|Error 1:" build.log | head -20
+            echo "================ CONTEXT ================"
+            first=$(grep -n -m1 "Error 1:" build.log | cut -d: -f1)
+            if [ -n "$first" ]; then
+              start=$((first-30)); [ $start -lt 1 ] && start=1
+              sed -n "${start},$((first+5))p" build.log
+            fi
+          fi
+          exit $status
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

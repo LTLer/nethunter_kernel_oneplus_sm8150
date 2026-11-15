@@ -1,0 +1,63 @@
+name: build-nethunter-kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev zip unzip wget curl \
+            python3 gcc-aarch64-linux-gnu device-tree-compiler
+
+      - name: Download clang r563880c
+        run: |
+          curl -L --retry 3 -o clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/f8439f0628d799092dd07df440a6334cab28939c/clang-r563880c.tar.gz"
+          mkdir -p toolchains
+          tar -xzf clang.tar.gz -C toolchains
+          ./toolchains/bin/clang --version
+
+      - name: Configure kernel
+        run: |
+          set -e
+          sed -i '/select MODVERSIONS/d' nethunter/Kconfig
+
+          mkdir -p out
+          KCONFIG_CONFIG=out/.config scripts/kconfig/merge_config.sh -m -r \
+            arch/arm64/configs/vendor/sm8150-perf_defconfig \
+            arch/arm64/configs/vendor/oplus.config \
+            nethunter/nethunter_defconfig
+
+          {
+            echo "CONFIG_MODULE_FORCE_LOAD=y"
+            echo "# CONFIG_MODVERSIONS is not set"
+          } >> out/.config
+
+          export PATH=$PWD/toolchains/bin:$PATH
+          make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 olddefconfig
+
+          echo "----- key config -----"
+          grep -E 'MODVERSIONS|MODULE_FORCE_LOAD|MODULE_SIG|^CONFIG_LOCALVERSION' out/.config || true
+
+      - name: Build Image.gz
+        run: |
+          export PATH=$PWD/toolchains/bin:$PATH
+          make -j$(nproc) ARCH=arm64 O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_32=arm-linux-gnueabi- \
+            LLVM=1 LLVM_IAS=1 AS=llvm-as DTC_EXT=$PWD/dtc Image.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nethunter-kernel-image
+          path: out/arch/arm64/boot/Image.gz
+          if-no-files-found: error

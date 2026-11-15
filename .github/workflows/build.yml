@@ -26,7 +26,14 @@ jobs:
           curl -L --retry 3 -o clang.tar.gz "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/f8439f0628d799092dd07df440a6334cab28939c/clang-r563880c.tar.gz"
           mkdir -p toolchains
           tar -xzf clang.tar.gz -C toolchains
-          ./toolchains/bin/clang --version
+          ./toolchains/bin/clang --version    
+      - name: Fix qcacld symlinks
+        run: |
+          cd drivers/staging/qcacld-3.0
+          for f in core/hdd/inc/*.h; do
+            b=$(basename "$f")
+            [ -e "inc/$b" ] || ln -s "../core/hdd/inc/$b" "inc/$b"
+          done
 
       - name: Configure kernel
         run: |

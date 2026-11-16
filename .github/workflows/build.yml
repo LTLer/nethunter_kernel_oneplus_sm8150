@@ -73,9 +73,13 @@ jobs:
             arch/arm64/configs/vendor/sm8150-perf_defconfig \
             arch/arm64/configs/vendor/oplus.config \
             nethunter/nethunter_defconfig
-          {
+           {
             echo "CONFIG_MODULE_FORCE_LOAD=y"
             echo "# CONFIG_MODVERSIONS is not set"
+            echo "CONFIG_RD_LZ4=y"
+            echo "CONFIG_RD_XZ=y"
+            echo "CONFIG_RD_LZO=y"
+            echo "CONFIG_INITRAMFS_IGNORE_SKIP_FLAG=y"
           } >> out/.config
           export PATH=$PWD/toolchains/bin:$PATH
           make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 olddefconfig

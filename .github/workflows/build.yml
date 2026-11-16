@@ -191,6 +191,7 @@ jobs:
           . tools/ak3-core.sh;
 
           dump_boot;
+          patch_cmdline androidboot.force_normal_boot "androidboot.force_normal_boot=1";
           write_boot;
           EOF
           cd ak3

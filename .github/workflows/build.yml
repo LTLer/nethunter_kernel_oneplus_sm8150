@@ -73,7 +73,7 @@ jobs:
             arch/arm64/configs/vendor/sm8150-perf_defconfig \
             arch/arm64/configs/vendor/oplus.config \
             nethunter/nethunter_defconfig
-           {
+          {
             echo "CONFIG_MODULE_FORCE_LOAD=y"
             echo "# CONFIG_MODVERSIONS is not set"
             echo "CONFIG_RD_LZ4=y"
@@ -84,7 +84,13 @@ jobs:
           export PATH=$PWD/toolchains/bin:$PATH
           make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 olddefconfig
           echo "----- key config -----"
-          grep -E 'MODVERSIONS|MODULE_FORCE_LOAD|MODULE_SIG|^CONFIG_LOCALVERSION' out/.config || true
+          grep -E 'MODVERSIONS|MODULE_FORCE_LOAD|MODULE_SIG|RD_LZ4|RD_XZ|RD_LZO|INITRAMFS_IGNORE_SKIP|^CONFIG_LOCALVERSION' out/.config || true
+          echo "----- boot-critical guard -----"
+          if ! grep -q '^CONFIG_RD_LZ4=y' out/.config; then
+            echo "FATAL: CONFIG_RD_LZ4 is not enabled - LineageOS lz4 ramdisk cannot be unpacked, aborting"
+            exit 1
+          fi
+          echo "CONFIG_RD_LZ4=y confirmed, keep building"
 
       - name: Build Image.gz
         run: |
